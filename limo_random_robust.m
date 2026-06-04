@@ -212,46 +212,34 @@ switch type
             end
             
             if bootex == 1
-                mkdir H0
-                % create a boot one_sample file to store data under H0 and H1
-                H0_one_sample = NaN(size(data,1), size(data,2),2,LIMO.design.bootstrap); % stores T and p values for each boot under H0
+                if ~exist('H0','dir'), mkdir H0; end
                 % create centered data to estimate H0
                 if strcmpi(LIMO.design.method,'Trimmed Mean')
                     centered_data = data - repmat(limo_trimmed_mean(data),[1 1 size(data,3)]);
-                elseif strcmpi(LIMO.design.method,'Mean')    
+                    trimmed = true;
+                else % strcmpi(LIMO.design.method,'Mean')
                     centered_data = data - repmat(nanmean(data,3),[1 1 size(data,3)]);
+                    trimmed = false;
                 end
-                % get boot table
-                disp('making boot table ...')
-                boot_table = limo_create_boot_table(data,LIMO.design.bootstrap);
-                save(['H0', filesep, 'boot_table'], 'boot_table')
-                
-                % get results under H0
-                for channel = 1:size(data,1)
-                    fprintf('bootstrap: channel %g parameter %g \n',channel,parameter);
-                    tmp = centered_data(channel,:,:);
-                    Y   = tmp(1,:,find(~isnan(tmp(1,1,:))));
-                    if strcmpi(LIMO.design.method,'Trimmed Mean')
-                        parfor b=1:LIMO.design.bootstrap
-                            [t{b},~,~,~,p{b},~,~] = limo_trimci(Y(1,:,boot_table{channel}(:,b)));
-                        end
-                    elseif strcmpi(LIMO.design.method,'Mean')
-                        parfor b=1:LIMO.design.bootstrap
-                            [~,~,~,~,~,t{b},p{b}] = limo_ttest(1,Y(1,:,boot_table{channel}(:,b)),0,5/100);
-                        end
-                    end
-                    
-                    for b=1:LIMO.design.bootstrap
-                        H0_one_sample(channel,:,1,b) = t{b};
-                        H0_one_sample(channel,:,2,b) = p{b};
-                    end
-                    clear tmp Y
-                end % closes for channel
-                
+                % get boot table (reuse/extend if present)
+                boot_table = limo_boot_table_get(fullfile('H0','boot_table.mat'),'boot_table',data,LIMO.design.bootstrap);
+
+                % chunked, resumable, memory-bounded bootstrap under H0 (identical
+                % result to the non-chunked path for the same boot_table)
+                if isfield(LIMO.design,'bootstrap_chunk') && ~isempty(LIMO.design.bootstrap_chunk)
+                    bopts.chunk_size = LIMO.design.bootstrap_chunk;
+                else
+                    bopts = struct;
+                end
+                chanfun = @(ch,br) limo_boot_onesample_channel(centered_data,boot_table,ch,br,trimmed);
+                limo_bootstrap_chunked(fullfile(LIMO.dir,'H0',[boot_name '.mat']), 'H0_one_sample', ...
+                    [size(data,1) size(data,2) 2 LIMO.design.bootstrap], (1:size(data,1))', LIMO.design.bootstrap, chanfun, bopts);
+
                 if strcmp(LIMO.Analysis,'Time-Frequency') ||  strcmp(LIMO.Analysis,'ITC')
-                    H0_one_sample = limo_tf_5d_reshape(H0_one_sample);
+                    tmpH = load(fullfile(LIMO.dir,'H0',[boot_name '.mat']));
+                    H0_one_sample = limo_tf_5d_reshape(tmpH.H0_one_sample); clear tmpH
+                    save (['H0', filesep, boot_name],'H0_one_sample','-v7.3');
                 end
-                save (['H0', filesep, boot_name],'H0_one_sample','-v7.3');
             end
         end
         
@@ -374,53 +362,38 @@ switch type
             end
             
             if bootex == 1
-                mkdir H0
-                % create a boot one_sample file to store data under H0
-                H0_two_samples = NaN(size(data1,1), size(data1,2), 2, LIMO.design.bootstrap); % stores T and p values for each boot
+                if ~exist('H0','dir'), mkdir H0; end
                 % create centered data to estimate H0
                 if contains(LIMO.design.method,'Trimmed Mean','IgnoreCase',true) || ...
                             contains(LIMO.design.method,'Welch','IgnoreCase',true)
                     data1_centered = data1 - repmat(limo_trimmed_mean(data1),[1 1 size(data1,3)]);
                     data2_centered = data2 - repmat(limo_trimmed_mean(data2),[1 1 size(data2,3)]);
+                    robust = true;
                 else % if strcmpi(LIMO.design.method,'Mean')
                     data1_centered = data1 - repmat(nanmean(data1,3),[1 1 size(data1,3)]);
                     data2_centered = data2 - repmat(nanmean(data2,3),[1 1 size(data2,3)]);
+                    robust = false;
                 end
-                % get boot table
-                disp('making boot tables ...')
-                boot_table1 = limo_create_boot_table(data1,LIMO.design.bootstrap);
-                boot_table2 = limo_create_boot_table(data2,LIMO.design.bootstrap);
-                save(['H0', filesep, 'boot_table1'], 'boot_table1')
-                save(['H0', filesep, 'boot_table2'], 'boot_table2')
-                
-                % get results under H0
-                for e = 1:size(array,1)
-                    channel = array(e);
-                    fprintf('bootstrapping channel %g/%g \n',e,size(array,1));
-                    tmp = data1_centered(channel,:,:); Y1 = tmp(1,:,find(~isnan(tmp(1,1,:)))); clear tmp
-                    tmp = data2_centered(channel,:,:); Y2 = tmp(1,:,find(~isnan(tmp(1,1,:)))); clear tmp
-                    if contains(LIMO.design.method,'Trimmed Mean','IgnoreCase',true) || ...
-                            contains(LIMO.design.method,'Welch','IgnoreCase',true)
-                        parfor b=1:LIMO.design.bootstrap
-                            [t{b},~,~,~,p{b},~,~]=limo_yuen_ttest(Y1(1,:,boot_table1{channel}(:,b)),Y2(1,:,boot_table2{channel}(:,b)));
-                        end
-                    else % if strcmpi(LIMO.design.method,'Mean')
-                        parfor b=1:LIMO.design.bootstrap
-                            [~,~,~,~,~,t{b},p{b}]=limo_ttest(2,Y1(1,:,boot_table1{channel}(:,b)),Y2(1,:,boot_table2{channel}(:,b)),.05);
-                        end
-                    end
-                    
-                    for b=1:LIMO.design.bootstrap
-                        H0_two_samples(channel,:,1,b) = t{b};
-                        H0_two_samples(channel,:,2,b) = p{b};
-                    end
-                    clear t p Y1 Y2
+                % get boot tables (one per group; reuse/extend if present)
+                boot_table1 = limo_boot_table_get(fullfile('H0','boot_table1.mat'),'boot_table1',data1,LIMO.design.bootstrap);
+                boot_table2 = limo_boot_table_get(fullfile('H0','boot_table2.mat'),'boot_table2',data2,LIMO.design.bootstrap);
+
+                % chunked, resumable, memory-bounded bootstrap under H0 (identical
+                % result to the non-chunked path for the same boot tables)
+                if isfield(LIMO.design,'bootstrap_chunk') && ~isempty(LIMO.design.bootstrap_chunk)
+                    bopts.chunk_size = LIMO.design.bootstrap_chunk;
+                else
+                    bopts = struct;
                 end
-                
+                chanfun = @(ch,br) limo_boot_twosample_channel(data1_centered,data2_centered,boot_table1,boot_table2,ch,br,robust);
+                limo_bootstrap_chunked(fullfile(LIMO.dir,'H0',[boot_name '.mat']), 'H0_two_samples', ...
+                    [size(data1,1) size(data1,2) 2 LIMO.design.bootstrap], array, LIMO.design.bootstrap, chanfun, bopts);
+
                 if strcmp(LIMO.Analysis,'Time-Frequency') ||  strcmp(LIMO.Analysis,'ITC')
-                    H0_two_samples = limo_tf_5d_reshape(H0_two_samples);
+                    tmpH = load(fullfile(LIMO.dir,'H0',[boot_name '.mat']));
+                    H0_two_samples = limo_tf_5d_reshape(tmpH.H0_two_samples); clear tmpH
+                    save (['H0', filesep, boot_name],'H0_two_samples','-v7.3');
                 end
-                save (['H0', filesep, boot_name],'H0_two_samples','-v7.3');
             end
         end % closes if LIMO.design.bootstrap > 0
 
@@ -541,49 +514,39 @@ switch type
             end
             
             if bootex == 1
-                mkdir H0
-                % create a boot one_sample file to store data under H0
-                H0_paired_samples = NaN(size(data1,1), size(data1,2), 2, LIMO.design.bootstrap); % stores T and p values for each boot
+                if ~exist('H0','dir'), mkdir H0; end
                 % create centered data to estimate H0
                 if contains(LIMO.design.method,'Trimmed Mean','IgnoreCase',true)
                     data1_centered = data1 - repmat(limo_trimmed_mean(data1),[1 1 size(data1,3)]);
                     data2_centered = data2 - repmat(limo_trimmed_mean(data2),[1 1 size(data2,3)]);
+                    trimmed = true;
                 else % if strcmpi(LIMO.design.method,'Mean')
                     data1_centered = data1 - repmat(nanmean(data1,3),[1 1 size(data1,3)]);
                     data2_centered = data2 - repmat(nanmean(data2,3),[1 1 size(data2,3)]);
+                    trimmed = false;
                 end
-                % get boot table
-                disp('making boot table ...')
-                boot_table = limo_create_boot_table(data1,LIMO.design.bootstrap);
-                save(['H0', filesep, 'boot_table'], 'boot_table')
-                
-                % get results under H0
-                for e = 1:size(array,1)
-                    channel = array(e);
-                    fprintf('bootstrapping channel %g/%g parameter %s \n',e,size(array,1),num2str(parameter')');
-                    tmp = data1_centered(channel,:,:); Y1 = tmp(1,:,find(~isnan(tmp(1,1,:)))); clear tmp
-                    tmp = data2_centered(channel,:,:); Y2 = tmp(1,:,find(~isnan(tmp(1,1,:)))); clear tmp
-                    if contains(LIMO.design.method,'Trimmed Mean','IgnoreCase',true)
-                        parfor b=1:LIMO.design.bootstrap
-                            [t{b},~,~,~,p{b},~,~]=limo_yuend_ttest(Y1(1,:,boot_table{channel}(:,b)),Y2(1,:,boot_table{channel}(:,b)));
-                        end
-                    else % if strcmpi(LIMO.design.method,'Mean')
-                        parfor b=1:LIMO.design.bootstrap
-                            [~,~,~,~,~,t{b},p{b}]=limo_ttest(1,Y1(1,:,boot_table{channel}(:,b)),Y2(1,:,boot_table{channel}(:,b)));
-                        end
-                    end
-                    
-                    for b=1:LIMO.design.bootstrap
-                        H0_paired_samples(channel,:,1,b) = t{b};
-                        H0_paired_samples(channel,:,2,b) = p{b};
-                    end
-                    clear t p Y1 Y2
+                % get boot table -- reuse/extend the saved table if present so
+                % a resumed or extended run keeps the same earlier resampling
+                boot_table = limo_boot_table_get(fullfile('H0','boot_table.mat'),'boot_table',data1,LIMO.design.bootstrap);
+
+                % chunked, resumable, memory-bounded bootstrap under H0.
+                % Identical result to the non-chunked path for the same
+                % boot_table; only one chunk is held in memory and each chunk
+                % is checkpointed so the run can resume after a crash.
+                if isfield(LIMO.design,'bootstrap_chunk') && ~isempty(LIMO.design.bootstrap_chunk)
+                    bopts.chunk_size = LIMO.design.bootstrap_chunk;
+                else
+                    bopts = struct;
                 end
-                
+                chanfun = @(ch,br) limo_boot_paired_channel(data1_centered,data2_centered,boot_table,ch,br,trimmed);
+                limo_bootstrap_chunked(fullfile(LIMO.dir,'H0',[boot_name '.mat']), 'H0_paired_samples', ...
+                    [size(data1,1) size(data1,2) 2 LIMO.design.bootstrap], array, LIMO.design.bootstrap, chanfun, bopts);
+
                 if strcmp(LIMO.Analysis,'Time-Frequency') ||  strcmp(LIMO.Analysis,'ITC')
-                    H0_paired_samples = limo_tf_5d_reshape(H0_paired_samples);
+                    tmpH = load(fullfile(LIMO.dir,'H0',[boot_name '.mat']));
+                    H0_paired_samples = limo_tf_5d_reshape(tmpH.H0_paired_samples); clear tmpH
+                    save (['H0', filesep, boot_name],'H0_paired_samples','-v7.3');
                 end
-                save (['H0', filesep, boot_name],'H0_paired_samples','-v7.3');
             end
         end % closes if LIMO.design.bootstrap > 0
         
