@@ -1953,7 +1953,7 @@ if stattest == 1 % one sample
         LIMO.data.data = LIMO.data.data';
     end
 
-    for i=size(LIMO.data.data,1):-1:1 % for each subject
+    for i=1:size(LIMO.data.data,1) % for each subject
         tmp = load(LIMO.data.data{i});
 
         % get indices to trim data
