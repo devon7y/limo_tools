@@ -79,21 +79,28 @@ end
 
 % ---------- granularity checks (chunk=small vs chunk=nboot) ----------
 function ok = gran_paired(d1,d2,nboot,meth)
-A = runchunk(@(L)limo_random_robust(3,d1,d2,[1 2],L), 'Paired_Samples_Ttest_parameter_1_2_desc-H0','H0_paired_samples',nboot,meth,17);
-B = runchunk(@(L)limo_random_robust(3,d1,d2,[1 2],L), 'Paired_Samples_Ttest_parameter_1_2_desc-H0','H0_paired_samples',nboot,meth,nboot);
+A = runchunk(@(L)limo_random_robust(3,d1,d2,[1 2],L), 'Paired_Samples_Ttest_parameter_1_2_desc-H0','H0_paired_samples',nboot,meth,17,   4243);
+B = runchunk(@(L)limo_random_robust(3,d1,d2,[1 2],L), 'Paired_Samples_Ttest_parameter_1_2_desc-H0','H0_paired_samples',nboot,meth,nboot,4243);
 ok = report('case3 chunk-size invariance', isequaln(A,B), maxdiff(A,B));
 end
 function ok = gran_onesample(d,nboot,meth)
-A = runchunk(@(L)limo_random_robust(1,d,1,L), 'One_Sample_Ttest_parameter_1_desc-H0','H0_one_sample',nboot,meth,17);
-B = runchunk(@(L)limo_random_robust(1,d,1,L), 'One_Sample_Ttest_parameter_1_desc-H0','H0_one_sample',nboot,meth,nboot);
+A = runchunk(@(L)limo_random_robust(1,d,1,L), 'One_Sample_Ttest_parameter_1_desc-H0','H0_one_sample',nboot,meth,17,   4244);
+B = runchunk(@(L)limo_random_robust(1,d,1,L), 'One_Sample_Ttest_parameter_1_desc-H0','H0_one_sample',nboot,meth,nboot,4244);
 ok = report('case1 chunk-size invariance', isequaln(A,B), maxdiff(A,B));
 end
 function ok = gran_twosample(g1,g2,nboot,meth)
-A = runchunk(@(L)limo_random_robust(2,g1,g2,[1 2],L), 'Two_Samples_Ttest_parameter_1_2_desc-H0','H0_two_samples',nboot,meth,17);
-B = runchunk(@(L)limo_random_robust(2,g1,g2,[1 2],L), 'Two_Samples_Ttest_parameter_1_2_desc-H0','H0_two_samples',nboot,meth,nboot);
+A = runchunk(@(L)limo_random_robust(2,g1,g2,[1 2],L), 'Two_Samples_Ttest_parameter_1_2_desc-H0','H0_two_samples',nboot,meth,17,   4245);
+B = runchunk(@(L)limo_random_robust(2,g1,g2,[1 2],L), 'Two_Samples_Ttest_parameter_1_2_desc-H0','H0_two_samples',nboot,meth,nboot,4245);
 ok = report('case2 chunk-size invariance', isequaln(A,B), maxdiff(A,B));
 end
-function H = runchunk(callfun, boot_name, var, nboot, meth, csz)
+function H = runchunk(callfun, boot_name, var, nboot, meth, csz, seed)
+% Seed the RNG identically for the small-chunk and full-chunk runs so both build
+% the SAME boot_table (limo_create_boot_table draws from the global RNG, once,
+% before chunking). With a shared seed the two runs compare the same resampling
+% at different chunk sizes -- which is exactly the invariance being tested.
+% (Without this, each run drew an independent unseeded boot_table, so the check
+% compared two different resamplings and spuriously failed.)
+if nargin >= 7 && ~isempty(seed), rng(seed); end
 d = tempname; mkdir(d); L = mk(d,nboot,meth); L.design.bootstrap_chunk = csz;
 callfun(L); H = ld(fullfile(d,'H0',[boot_name '.mat']),var);
 end
